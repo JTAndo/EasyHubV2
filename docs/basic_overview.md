@@ -12,6 +12,34 @@
 
 ---
 
+# EasyHubV2 Architecture Design
+
+## Overview
+EasyHubV2 is a system designed to manage user roles and permissions, linking Admins and Non-Admins while ensuring flexibility, scalability, and security. It uses a modular architecture with a clear separation of concerns between the backend, frontend, and database layers.
+
+---
+
+## Architecture Diagram
+
+```plaintext
++---------------------------+             +-----------------------+
+|       Admin App           |             |   Non-Admin App       |
+|    (Flutter Frontend)     |             |   (Flutter Frontend)  |
++---------------------------+             +-----------------------+
+          |                                      |
+          |                                      |
+          +---------------+  API  +-------------+
+                          |       |
+                  +-----------------------+
+                  |     Azure Functions   |
+                  |       (Backend)       |
+                  +-----------------------+
+                          |       |
+          +-------------------------------------+
+          |            PostgreSQL DB           |
+          +-------------------------------------+
+
+
 ## Recent Updates (January 19, 2025)
 
 ### SuperAdmin Role
