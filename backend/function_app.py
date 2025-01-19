@@ -28,6 +28,7 @@ def registerUser(req: func.HttpRequest) -> func.HttpResponse:
         role = req_body.get("role")
         permissions = req_body.get("permissions", {})
         linked_admins = req_body.get("linked_admins", [])
+        linked_non_admins = req_body.get("linked_non_admins", [])
 
         remote_access = permissions.get("remote_access", False)
         video_call = permissions.get("video_call", False)
@@ -47,29 +48,66 @@ def registerUser(req: func.HttpRequest) -> func.HttpResponse:
                     cursor.execute(
                         """
                         INSERT INTO admins (name, email, remote_access, video_call, voice_call, manage_users)
-                        VALUES (%s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
                         """,
                         (name, email, remote_access, video_call, voice_call, manage_users),
                     )
+                    admin_id = cursor.fetchone()[0]
+                    
+                    if linked_non_admins:
+                        for non_admin_email in linked_non_admins:
+                            # Retrieve the Non-Admin ID
+                            cursor.execute(
+                                "SELECT id, name FROM non_admins WHERE email = %s",
+                                (non_admin_email,)
+                            )
+                            non_admin_data = cursor.fetchone()
+                            if non_admin_data:
+                                non_admin_id, non_admin_name = non_admin_data
+                                # Insert into admin_non_admin
+                                cursor.execute(
+                                    """
+                                    INSERT INTO admin_non_admin (admin_id, non_admin_id, admin_email, name)
+                                    VALUES (%s, %s, %s, %s)
+                                    """,
+                                    (admin_id, non_admin_id, email, non_admin_name)
+                                )
                     connection.commit()
                     logging.info("Admin added successfully.")
-                elif role == "Non-Admin":
-                    cursor.execute(
-                        """
-                        INSERT INTO non_admins (name, email, family_member_count, admin_ids)
-                        VALUES (%s, %s, %s, %s)
-                        RETURNING id
-                        """,
-                        (name, email, 0, "{}"),  # Initialize with empty admin_ids and 0 family_member_count
-                    )
-                    non_admin_id = cursor.fetchone()[0]
-                    connection.commit()
-                    logging.info(f"Non-Admin {name} added successfully.")
-                    
-                    for admin_email in linked_admins:
-                        cursor.execute("""insert into admin_non_admin (name, admin_email, non_admin_id) values (%s, %s, %s)""", (name, admin_email, non_admin_id))
-                        connection.commit()
-                        #logging.info(f"Linked {admin_ids} to non admin {non_admin_id}.")
+                elif role == 'Non-Admin':
+                    with get_db_connection() as connection:
+                        with connection.cursor() as cursor:
+                            # Insert the Non-Admin into the database
+                            cursor.execute(
+                                """
+                                INSERT INTO non_admins (name, email, family_member_count)
+                                VALUES (%s, %s, %s) RETURNING id
+                                """,
+                                (name, email, 0)
+                            )
+                            non_admin_id = cursor.fetchone()[0]
+
+                            # Link to Admins if provided
+                            if linked_admins:
+                                for admin_email in linked_admins:
+                                    # Retrieve the Admin ID
+                                    cursor.execute(
+                                        "SELECT id, name FROM admins WHERE email = %s",
+                                        (admin_email,)
+                                    )
+                                    admin_data = cursor.fetchone()
+                                    if admin_data:
+                                        admin_id, admin_name = admin_data
+                                        # Insert into admin_non_admin
+                                        cursor.execute(
+                                            """
+                                            INSERT INTO admin_non_admin (admin_id, non_admin_id, admin_email, name)
+                                            VALUES (%s, %s, %s, %s)
+                                            """,
+                                            (admin_id, non_admin_id, admin_email, name)
+                                        )
+
+                            connection.commit()
 
         return func.HttpResponse(
             json.dumps({"message": f"User {name} registered successfully.", "role": role}),
