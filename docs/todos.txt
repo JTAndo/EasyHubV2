@@ -1,3 +1,6 @@
 TODOS: 
 1. fix admin table for non_admin_ids 
 2. fix admins_ids for non_admins 
+3. Add security so no one can just add a non_admin under them
+
+We def need to add super admin feature. Only one super admin per non admin. Admin gets a new flag of whether they can other admins. ugh. 
