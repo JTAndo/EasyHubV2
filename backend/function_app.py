@@ -5,17 +5,10 @@ import os
 import json
 import logging
 from dotenv import load_dotenv
+from models.users import SuperAdmin, Admin, NonAdmin
+from db_utils import get_db_connection
 
-load_dotenv()
 app = func.FunctionApp()
-
-def get_db_connection():
-    return psycopg2.connect(
-        host=os.getenv('DB_HOST'),
-        database=os.getenv('DB_NAME'),
-        user=os.getenv('DB_USER'),
-        password=os.getenv('DB_PASSWORD')
-    )
 
 @app.route(route="registerUser", auth_level=func.AuthLevel.ANONYMOUS)
 def registerUser(req: func.HttpRequest) -> func.HttpResponse:
@@ -27,93 +20,65 @@ def registerUser(req: func.HttpRequest) -> func.HttpResponse:
         email = req_body.get("email")
         role = req_body.get("role")
         permissions = req_body.get("permissions", {})
-        linked_admins = req_body.get("linked_admins", [])
-        linked_non_admins = req_body.get("linked_non_admins", [])
-
-        remote_access = permissions.get("remote_access", False)
-        video_call = permissions.get("video_call", False)
-        voice_call = permissions.get("voice_call", False)
-        manage_users = permissions.get("manage_users", False)
 
         if not name or not email or not role:
             return func.HttpResponse(
-                json.dumps({"error": "Missing required fields: name, email, or role."}),
+                json.dumps(
+                    {"error": "Missing required fields: name, email, or role."}
+                ),
                 status_code=400,
                 mimetype="application/json",
             )
 
         with get_db_connection() as connection:
             with connection.cursor() as cursor:
-                if role == "Admin":
-                    cursor.execute(
-                        """
-                        INSERT INTO admins (name, email, remote_access, video_call, voice_call, manage_users)
-                        VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
-                        """,
-                        (name, email, remote_access, video_call, voice_call, manage_users),
+                if role == "SuperAdmin":
+                    super_admin = SuperAdmin(
+                        name=name, email=email, permissions=permissions
                     )
-                    admin_id = cursor.fetchone()[0]
-                    
-                    if linked_non_admins:
-                        for non_admin_email in linked_non_admins:
-                            # Retrieve the Non-Admin ID
-                            cursor.execute(
-                                "SELECT id, name FROM non_admins WHERE email = %s",
-                                (non_admin_email,)
-                            )
-                            non_admin_data = cursor.fetchone()
-                            if non_admin_data:
-                                non_admin_id, non_admin_name = non_admin_data
-                                # Insert into admin_non_admin
-                                cursor.execute(
-                                    """
-                                    INSERT INTO admin_non_admin (admin_id, non_admin_id, admin_email, name)
-                                    VALUES (%s, %s, %s, %s)
-                                    """,
-                                    (admin_id, non_admin_id, email, non_admin_name)
-                                )
+                    admin_id = super_admin.save_to_db(cursor)
+                    connection.commit()
+                    logging.info("SuperAdmin added successfully.")
+                    return func.HttpResponse(
+                        json.dumps(
+                            {
+                                "message": f"Super Admin {name} registered successfully.",
+                                "Admin ID": admin_id,
+                            }
+                        ),
+                        status_code=201,
+                        mimetype="application/json",
+                    )
+                elif role == "Admin":
+                    admin = Admin(name=name, email=email, permissions=permissions)
+                    admin_id = admin.save_to_db(cursor)
                     connection.commit()
                     logging.info("Admin added successfully.")
-                elif role == 'Non-Admin':
-                    with get_db_connection() as connection:
-                        with connection.cursor() as cursor:
-                            # Insert the Non-Admin into the database
-                            cursor.execute(
-                                """
-                                INSERT INTO non_admins (name, email, family_member_count)
-                                VALUES (%s, %s, %s) RETURNING id
-                                """,
-                                (name, email, 0)
-                            )
-                            non_admin_id = cursor.fetchone()[0]
-
-                            # Link to Admins if provided
-                            if linked_admins:
-                                for admin_email in linked_admins:
-                                    # Retrieve the Admin ID
-                                    cursor.execute(
-                                        "SELECT id, name FROM admins WHERE email = %s",
-                                        (admin_email,)
-                                    )
-                                    admin_data = cursor.fetchone()
-                                    if admin_data:
-                                        admin_id, admin_name = admin_data
-                                        # Insert into admin_non_admin
-                                        cursor.execute(
-                                            """
-                                            INSERT INTO admin_non_admin (admin_id, non_admin_id, admin_email, name)
-                                            VALUES (%s, %s, %s, %s)
-                                            """,
-                                            (admin_id, non_admin_id, admin_email, name)
-                                        )
-
-                            connection.commit()
-
-        return func.HttpResponse(
-            json.dumps({"message": f"User {name} registered successfully.", "role": role}),
-            status_code=201,
-            mimetype="application/json",
-        )
+                    return func.HttpResponse(
+                        json.dumps(
+                            {
+                                "message": f"Admin {name} registered successfully.",
+                                "Admin ID": admin_id,
+                            }
+                        ),
+                        status_code=201,
+                        mimetype="application/json",
+                    )
+                elif role == "Non-Admin":
+                    non_admin = NonAdmin(name=name, email=email)
+                    non_admin_id = non_admin.save_to_db(cursor)
+                    connection.commit()
+                    logging.info("Non-Admin added successfully.")
+                    return func.HttpResponse(
+                        json.dumps(
+                            {
+                                "message": f"Non-Admin {name} registered successfully.",
+                                "Non-Admin ID": non_admin_id,
+                            }
+                        ),
+                        status_code=201,
+                        mimetype="application/json",
+                    )
 
     except psycopg2.IntegrityError:
         return func.HttpResponse(
@@ -121,13 +86,28 @@ def registerUser(req: func.HttpRequest) -> func.HttpResponse:
             status_code=400,
             mimetype="application/json",
         )
-    except Exception as e:
-        logging.error(f"Unexpected error: {str(e)}")
+    except psycopg2.Error as e:
+        logging.error("Unexpected database error: %s", str(e))
         return func.HttpResponse(
             json.dumps({"error": "Internal server error."}),
             status_code=500,
             mimetype="application/json",
         )
+    except json.JSONDecodeError as e:
+        logging.error("JSON decode error: %s", str(e))
+        return func.HttpResponse(
+            json.dumps({"error": "Invalid JSON format."}),
+            status_code=400,
+            mimetype="application/json",
+        )
+    except Exception as e:
+        logging.error("Unexpected error: %s", str(e))
+        return func.HttpResponse(
+            json.dumps({"error": "Internal server error."}),
+            status_code=500,
+            mimetype="application/json",
+        )
+
 @app.route(route="linkAdminToNonAdmin", auth_level=func.AuthLevel.ANONYMOUS)
 def linkAdminToNonAdmin(req: func.HttpRequest) -> func.HttpResponse:
     try:
@@ -188,7 +168,7 @@ def getUsers(req: func.HttpRequest) -> func.HttpResponse:
     try:
         with get_db_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT id, name, email, role, permissions FROM users")
+                cursor.execute("SELECT id, name, email, role FROM users")
                 rows = cursor.fetchall()
 
         users = [
@@ -196,8 +176,7 @@ def getUsers(req: func.HttpRequest) -> func.HttpResponse:
                 "id": row[0],
                 "name": row[1],
                 "email": row[2],
-                "role": row[3],
-                "permissions": json.loads(row[4]) if row[4] else {}
+                "role": row[3]
             }
             for row in rows
         ]
