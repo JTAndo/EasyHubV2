@@ -16,9 +16,6 @@
 
 ## Overview
 EasyHubV2 is a system designed to manage user roles and permissions, linking Admins and Non-Admins while ensuring flexibility, scalability, and security. It uses a modular architecture with a clear separation of concerns between the backend, frontend, and database layers.
-
----
-
 ## Architecture Diagram
 
 ```plaintext
@@ -39,6 +36,8 @@ EasyHubV2 is a system designed to manage user roles and permissions, linking Adm
           |            PostgreSQL DB           |
           +-------------------------------------+
 
+
+---
 
 ## Recent Updates (January 19, 2025)
 
